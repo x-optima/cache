@@ -1,0 +1,82 @@
+# Запускаем командой ansible-playbook -i hosts.ini playbook1.yml --ask-vault-pass
+---
+- name: playbook1
+  gather_facts: true
+  hosts: servers
+  vars:
+    ansible_ssh_user: yc-user
+  become: yes
+
+  pre_tasks:
+    - name: Проверка SSH порта
+      wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: 22
+        delay: 5
+        timeout: 300
+        state: started
+        search_regex: OpenSSH
+
+  tasks:
+    - name: Обновление apt кэша
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Установка memcached и утилит
+      apt:
+        name:
+          - memcached
+          - libmemcached-tools
+        state: present
+
+    - name: Запуск и включение memcached
+      systemd:
+        name: memcached
+        state: started
+        enabled: yes
+
+    - name: Проверка статуса memcached
+      systemd:
+        name: memcached
+      register: memcached_status
+
+    - name: Отображение статуса memcached
+      debug:
+        var: memcached_status.status
+
+    - name: Проверка порта memcached
+      wait_for:
+        port: 11211
+        host: localhost
+        delay: 5
+        timeout: 30
+        state: started
+
+    - name: Тест подключения к memcached
+      command: telnet localhost 11211 -w 5
+      register: telnet_result
+      failed_when: false
+      changed_when: false
+
+    - name: Результат теста telnet
+      debug:
+        msg: "{{ 'Memcached доступен на порту 11211' if telnet_result.rc == 0 else 'Telnet тест не прошел (но memcached может работать)' }}"
+
+    - name: Сохранение конфигурации memcached
+      copy:
+        content: |
+          # Memcached config for cache server
+          -m 256
+          -p 11211
+          -u memcache
+          -l 127.0.0.1
+        dest: /etc/default/memcached
+        backup: yes
+      notify: restart memcached
+
+  handlers:
+    - name: restart memcached
+      systemd:
+        name: memcached
+        state: restarted 
