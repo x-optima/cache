@@ -1,0 +1,77 @@
+# Запускаем командой ansible-playbook -i hosts.ini playbook2.yml --ask-vault-pass
+---
+- name: playbook2
+  gather_facts: true
+  hosts: servers
+  vars:
+    ansible_ssh_user: yc-user
+  become: yes
+
+  pre_tasks:
+    - name: Проверка SSH порта
+      wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: 22
+        delay: 5
+        timeout: 300
+        state: started
+        search_regex: OpenSSH
+
+  tasks:
+    - name: Обновление apt кэша
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Установка Redis Server
+      apt:
+        name: redis-server
+        state: present
+        update_cache: yes
+
+    - name: Запуск и автозапуск Redis
+      systemd:
+        name: redis-server
+        state: started
+        enabled: yes
+
+    - name: Ожидание порта Redis 6379
+      wait_for:
+        port: 6379
+        host: localhost
+        delay: 5
+        timeout: 30
+        state: started
+
+    - name: Открытие порта 6379 в UFW
+      ufw:
+        rule: allow
+        port: 6379
+        proto: tcp
+      ignore_errors: yes
+
+    - name: Проверка статуса Redis
+      systemd:
+        name: redis-server
+      register: redis_status
+
+    - name: Вывод статуса Redis
+      debug:
+        msg: "Redis статус: {{ redis_status.status.ActiveState }}"
+
+    - name: Настройка bind только localhost (безопасность)
+      lineinfile:
+        path: /etc/redis/redis.conf
+        regexp: '^#?bind'
+        line: 'bind 127.0.0.1 ::1'
+        backup: yes
+      notify: restart_redis
+
+    - name: Применение handlers
+      meta: flush_handlers
+
+  handlers:
+    - name: restart_redis
+      systemd:
+        name: redis-server
+        state: restarted

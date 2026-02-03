@@ -48,6 +48,15 @@ resource "yandex_vpc_security_group" "cache_server" {
     to_port        = 11211
   }
 
+  # Redis Server
+  ingress {
+    description    = "Redis 6379"
+    protocol       = "TCP"
+    v4_cidr_blocks = ["0.0.0.0/0"]
+    from_port      = 6379
+    to_port        = 6379
+  }
+
   # Egress полный
   egress {
     description    = "ANY outbound"
